@@ -1,0 +1,69 @@
+# AGENTS.md asks for every fixture to pass under Wine before it runs against
+# wibo; Windows itself is the reference when the two disagree.
+name: Fixtures on Wine and Windows
+
+on:
+  push:
+    branches: [fixture-check]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build fixtures
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Build
+        run: |
+          docker build -f Dockerfile.ubuntu --target build -t wibo-fixtures .
+          docker run --name fixtures wibo-fixtures cmake --build /wibo/build --target wibo_test_fixtures
+          docker cp fixtures:/wibo/build/test bin
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fixtures
+          path: |
+            bin/*.exe
+            bin/*.dll
+
+  wine:
+    name: Run under Wine
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: fixtures
+          path: bin
+
+      - name: Install Wine
+        run: |
+          sudo dpkg --add-architecture i386
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends wine wine32:i386
+          WINEDEBUG=-all wineboot --init
+          wine --version
+
+      - name: Run fixtures
+        env:
+          WINEDEBUG: -all
+        run: .github/run-fixtures.sh bin wine
+
+  windows:
+    name: Run on Windows
+    needs: build
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: fixtures
+          path: bin
+
+      - name: Run fixtures
+        shell: bash
+        run: .github/run-fixtures.sh bin
